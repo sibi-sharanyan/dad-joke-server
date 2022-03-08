@@ -48,13 +48,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-var express_1 = __importDefault(require("express"));
-var socket_io_1 = require("socket.io");
-var body_parser_1 = __importDefault(require("body-parser"));
-var dotenv_1 = __importDefault(require("dotenv"));
-var http_1 = __importDefault(require("http"));
-var cors_1 = __importDefault(require("cors"));
 var axios_1 = __importDefault(require("axios"));
+var body_parser_1 = __importDefault(require("body-parser"));
+var cors_1 = __importDefault(require("cors"));
+var dotenv_1 = __importDefault(require("dotenv"));
+var express_1 = __importDefault(require("express"));
+var http_1 = __importDefault(require("http"));
+var socket_io_1 = require("socket.io");
 dotenv_1.default.config();
 var PORT = process.env.PORT || 3001;
 var app = (0, express_1.default)();
@@ -64,9 +64,9 @@ app.use((0, cors_1.default)());
 app.use(body_parser_1.default.json());
 app.use(body_parser_1.default.urlencoded({ extended: true }));
 app.get("/", function (req, res) {
-    res.send("<h1>Hello from the TypeScript world1!</h1>");
+    res.send("<h1>Hello World!</h1>");
 });
-var counter = 1;
+var counter = 1; // Counter for auto increamenting client IDs. Reset when server restarts.
 var socketNumberMap = new Map();
 var jokeStreams = new Map();
 var clientSubStreams = new Map();
@@ -125,17 +125,25 @@ var initJokeStream = function (socket) { return __awaiter(void 0, void 0, void 0
         return [2 /*return*/];
     });
 }); };
-function mapToObj(inputMap) {
+var mapToObj = function (inputMap) {
     var obj = {};
     inputMap.forEach(function (value, key) {
         obj[key] = value;
     });
     return obj;
-}
+};
+var removeClientFromAllJokeStreams = function (socketId) {
+    clientSubStreams.forEach(function (clients, stream) {
+        clients.forEach(function (client) {
+            if (client.id === socketId) {
+                clientSubStreams.set(stream, clients.filter(function (c) { return c.id !== socketId; }));
+            }
+        });
+    });
+};
 io.on("connection", function (socket) {
     console.log("socket connected");
     socket.join("all-clients");
-    // socket.join(`joke-stream-${socket.id}`); //Check if by default we listen to our jokes
     socketNumberMap.set(socket.id, counter++);
     initJokeStream(socket.id);
     io.to("all-clients").emit("all-clients", getAllClients());
@@ -157,16 +165,17 @@ io.on("connection", function (socket) {
         io.to("all-clients").emit("update-sub-streams", mapToObj(clientSubStreams));
     });
     socket.on("remove-client-from-stream", function (data) {
-        var clientSubStreamsArray = clientSubStreams.get(socket.id) || [];
+        var clientSubStreamsArray = clientSubStreams.get(data.jokeStreamId) || [];
         clientSubStreams.set(data.jokeStreamId, clientSubStreamsArray.filter(function (client) { return client.id !== data.clientId; }));
         socket.leave("joke-stream-" + data.jokeStreamId);
         io.to("all-clients").emit("update-sub-streams", mapToObj(clientSubStreams));
     });
     socket.on("disconnect", function () {
         console.log("socket disconnected");
-        socket.leave("all-clients");
+        removeClientFromAllJokeStreams(socket.id);
         clearInterval(jokeStreams.get(socket.id));
+        io.to("all-clients").emit("update-sub-streams", mapToObj(clientSubStreams));
         io.to("all-clients").emit("all-clients", getAllClients());
     });
 });
-server.listen(PORT, function () { return console.log("Running on ".concat(PORT, " \u26A1")); });
+server.listen(PORT, function () { return console.log("Running on ".concat(PORT)); });

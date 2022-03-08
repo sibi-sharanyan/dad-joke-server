@@ -1,4 +1,4 @@
-export interface IAddToStreamReq {
+export interface IJokeStreamReq {
   jokeStreamId: string;
   clientId: string;
 }
