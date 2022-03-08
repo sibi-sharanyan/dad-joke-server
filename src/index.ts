@@ -4,7 +4,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import express, { Express, Request, Response } from "express";
 import http from "http";
-import { Server } from "socket.io";
+import { Server, Socket } from "socket.io";
 import { IClient, IJokeStreamReq } from "./types";
 dotenv.config();
 
@@ -26,6 +26,7 @@ let counter = 1; // Counter for auto increamenting client IDs. Reset when server
 const socketNumberMap = new Map<string, number>();
 const jokeStreams = new Map<string, any>();
 const clientSubStreams = new Map<string, IClient[]>();
+const socketMap = new Map<string, Socket>();
 
 const getAllClients = () => {
   let clients: string[] = [];
@@ -59,7 +60,13 @@ const initJokeStream = async (socket: string) => {
       socket,
       setInterval(async () => {
         const joke = await getRandomJokeFromServer();
-        console.log("joke from ", socket, joke);
+        console.log(
+          "joke from ",
+          socket,
+          joke,
+          io.sockets.adapter.rooms.get("joke-stream-" + socket),
+          `client ${socketNumberMap.get(socket)}`
+        );
         io.to("joke-stream-" + socket).emit("joke", {
           joke: joke,
           fromClientId: `client ${socketNumberMap.get(socket)}`,
@@ -99,6 +106,8 @@ const removeClientFromAllJokeStreams = (socketId: string) => {
 io.on("connection", (socket) => {
   console.log("socket connected");
 
+  socketMap.set(socket.id, socket);
+
   socket.join(`all-clients`);
   socketNumberMap.set(socket.id, counter++);
 
@@ -116,6 +125,13 @@ io.on("connection", (socket) => {
       return;
     }
 
+    let targetSocket = socketMap.get(data.clientId);
+
+    if (!targetSocket) {
+      console.log("client not found");
+      return;
+    }
+
     clientSubStreams.set(data.jokeStreamId, [
       ...clientSubStreamsArray,
       {
@@ -124,25 +140,34 @@ io.on("connection", (socket) => {
       },
     ]);
 
-    socket.join("joke-stream-" + data.jokeStreamId);
+    targetSocket.join("joke-stream-" + data.jokeStreamId);
 
     io.to(`all-clients`).emit("update-sub-streams", mapToObj(clientSubStreams));
   });
 
   socket.on("remove-client-from-stream", (data: IJokeStreamReq) => {
+    let targetSocket = socketMap.get(data.clientId);
+
+    if (!targetSocket) {
+      console.log("client not found");
+      return;
+    }
+
     const clientSubStreamsArray = clientSubStreams.get(data.jokeStreamId) || [];
 
     clientSubStreams.set(
       data.jokeStreamId,
       clientSubStreamsArray.filter((client) => client.id !== data.clientId)
     );
-    socket.leave("joke-stream-" + data.jokeStreamId);
+    targetSocket.leave("joke-stream-" + data.jokeStreamId);
 
     io.to(`all-clients`).emit("update-sub-streams", mapToObj(clientSubStreams));
   });
 
   socket.on("disconnect", () => {
     console.log("socket disconnected");
+
+    socketMap.delete(socket.id);
 
     removeClientFromAllJokeStreams(socket.id);
     clearInterval(jokeStreams.get(socket.id));

@@ -70,6 +70,7 @@ var counter = 1; // Counter for auto increamenting client IDs. Reset when server
 var socketNumberMap = new Map();
 var jokeStreams = new Map();
 var clientSubStreams = new Map();
+var socketMap = new Map();
 var getAllClients = function () {
     var clients = [];
     var allClients = io.sockets.adapter.rooms.get("all-clients");
@@ -109,7 +110,7 @@ var initJokeStream = function (socket) { return __awaiter(void 0, void 0, void 0
                         case 0: return [4 /*yield*/, getRandomJokeFromServer()];
                         case 1:
                             joke = _a.sent();
-                            console.log("joke from ", socket, joke);
+                            console.log("joke from ", socket, joke, io.sockets.adapter.rooms.get("joke-stream-" + socket), "client ".concat(socketNumberMap.get(socket)));
                             io.to("joke-stream-" + socket).emit("joke", {
                                 joke: joke,
                                 fromClientId: "client ".concat(socketNumberMap.get(socket)),
@@ -143,6 +144,7 @@ var removeClientFromAllJokeStreams = function (socketId) {
 };
 io.on("connection", function (socket) {
     console.log("socket connected");
+    socketMap.set(socket.id, socket);
     socket.join("all-clients");
     socketNumberMap.set(socket.id, counter++);
     initJokeStream(socket.id);
@@ -155,23 +157,34 @@ io.on("connection", function (socket) {
             console.log("client already in stream");
             return;
         }
+        var targetSocket = socketMap.get(data.clientId);
+        if (!targetSocket) {
+            console.log("client not found");
+            return;
+        }
         clientSubStreams.set(data.jokeStreamId, __spreadArray(__spreadArray([], clientSubStreamsArray, true), [
             {
                 name: "client ".concat(socketNumberMap.get(data.clientId)),
                 id: data.clientId,
             },
         ], false));
-        socket.join("joke-stream-" + data.jokeStreamId);
+        targetSocket.join("joke-stream-" + data.jokeStreamId);
         io.to("all-clients").emit("update-sub-streams", mapToObj(clientSubStreams));
     });
     socket.on("remove-client-from-stream", function (data) {
+        var targetSocket = socketMap.get(data.clientId);
+        if (!targetSocket) {
+            console.log("client not found");
+            return;
+        }
         var clientSubStreamsArray = clientSubStreams.get(data.jokeStreamId) || [];
         clientSubStreams.set(data.jokeStreamId, clientSubStreamsArray.filter(function (client) { return client.id !== data.clientId; }));
-        socket.leave("joke-stream-" + data.jokeStreamId);
+        targetSocket.leave("joke-stream-" + data.jokeStreamId);
         io.to("all-clients").emit("update-sub-streams", mapToObj(clientSubStreams));
     });
     socket.on("disconnect", function () {
         console.log("socket disconnected");
+        socketMap.delete(socket.id);
         removeClientFromAllJokeStreams(socket.id);
         clearInterval(jokeStreams.get(socket.id));
         io.to("all-clients").emit("update-sub-streams", mapToObj(clientSubStreams));
